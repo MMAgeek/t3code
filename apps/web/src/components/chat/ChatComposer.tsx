@@ -9,6 +9,7 @@ import type {
   RuntimeMode,
   ScopedThreadRef,
   ServerProvider,
+  ServerProviderSkill,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -75,6 +76,7 @@ import {
   removeInlineTerminalContextPlaceholder,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
+import { useWorkspaceProviderSkills } from "../../state/queries";
 import { type ElementContextDraft } from "../../lib/elementContext";
 import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
@@ -122,6 +124,8 @@ function composerCommandMenuPositionsEqual(
     a.bottom === b.bottom && a.left === b.left && a.maxHeight === b.maxHeight && a.width === b.width
   );
 }
+
+const EMPTY_PROVIDER_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 
 function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
@@ -849,6 +853,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
   );
+  // Skills resolved against the active workspace (project path / worktree)
+  // rather than the server process cwd baked into the snapshot.
+  const workspaceProviderSkills = useWorkspaceProviderSkills({
+    environmentId,
+    instanceId: selectedProviderEntry ? selectedInstanceId : null,
+    cwd: gitCwd,
+    snapshotSkills: selectedProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS,
+  });
 
   const composerPromptInjectionState = useMemo(
     () => getComposerPromptInjectionState(prompt),
@@ -1082,19 +1094,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return searchSlashCommandItems(slashCommandItems, query);
     }
     if (composerTrigger.kind === "skill") {
-      return searchProviderSkills(selectedProviderStatus?.skills ?? [], composerTrigger.query).map(
-        (skill) => ({
-          id: `skill:${selectedProvider}:${skill.name}`,
-          type: "skill" as const,
-          provider: selectedProvider,
-          skill,
-          label: formatProviderSkillDisplayName(skill),
-          description:
-            skill.shortDescription ??
-            skill.description ??
-            (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
-        }),
-      );
+      return searchProviderSkills(workspaceProviderSkills, composerTrigger.query).map((skill) => ({
+        id: `skill:${selectedProvider}:${skill.name}`,
+        type: "skill" as const,
+        provider: selectedProvider,
+        skill,
+        label: formatProviderSkillDisplayName(skill),
+        description:
+          skill.shortDescription ??
+          skill.description ??
+          (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+      }));
     }
     return [];
   }, [
@@ -1103,6 +1113,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProvider,
     selectedProviderStatus,
     workspaceEntries.entries,
+    workspaceProviderSkills,
   ]);
 
   const composerMenuOpen = Boolean(composerTrigger);
@@ -3032,7 +3043,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     ? composerTerminalContexts
                     : []
                 }
-                skills={selectedProviderStatus?.skills ?? []}
+                skills={workspaceProviderSkills}
                 {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
                 onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                 onChange={onPromptChange}
